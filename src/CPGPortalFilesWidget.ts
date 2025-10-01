@@ -385,26 +385,12 @@ export class CPGPortalFilesWidget extends Widget {
     try {
       // If this is a group, create a folder and download all children
       if (file.children && file.children.length > 0) {
-        // Create the group folder (or use existing one)
-        const safeFolderName = this._sanitizeFileName(file.name);
-        try {
-          await this._app.serviceManager.contents.save(safeFolderName, {
-            type: 'directory'
-          });
-        } catch (error) {
-          // Folder might already exist, that's okay - we'll save over it
-          console.log(
-            `Folder ${safeFolderName} might already exist, continuing...`
-          );
-        }
-
-        // Download each child file into the group folder
+        // Download each child file
         for (const child of file.children) {
-          await this._downloadSingleFile(child, `${safeFolderName}/`);
+          await this._downloadSingleFile(child);
         }
         return;
       }
-
       // For regular files, download directly
       await this._downloadSingleFile(file);
     } catch (error) {
