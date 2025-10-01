@@ -7,6 +7,8 @@ export interface ICPGPortalFile {
   id: string;
   run_id: string;
   created_at: string;
+  children?: ICPGPortalFile[];
+  is_group: boolean;
 }
 
 export interface ICPGPortalContents {

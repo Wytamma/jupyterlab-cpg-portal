@@ -194,7 +194,12 @@ export class CPGPortalFilesWidget extends Widget {
 
     const nameCol = new Widget();
     nameCol.node.textContent = 'File Name';
-    nameCol.node.style.flex = '4';
+    nameCol.node.style.flex = '3';
+
+    const typeCol = new Widget();
+    typeCol.node.textContent = 'Type';
+    typeCol.node.style.flex = '2';
+    typeCol.node.style.textAlign = 'right';
 
     const createdCol = new Widget();
     createdCol.node.textContent = 'Created';
@@ -212,6 +217,7 @@ export class CPGPortalFilesWidget extends Widget {
     actionCol.node.style.width = '25px';
 
     header.node.appendChild(nameCol.node);
+    header.node.appendChild(typeCol.node);
     header.node.appendChild(createdCol.node);
     header.node.appendChild(sizeCol.node);
     header.node.appendChild(actionCol.node);
@@ -233,10 +239,20 @@ export class CPGPortalFilesWidget extends Widget {
     // File name column.
     const nameWidget = new Widget();
     nameWidget.node.textContent = file.name;
-    nameWidget.node.style.flex = '4';
+    nameWidget.node.style.flex = '3';
     nameWidget.node.style.whiteSpace = 'nowrap';
     nameWidget.node.style.overflow = 'hidden';
     nameWidget.node.style.textOverflow = 'ellipsis';
+
+    // Type column.
+    const typeWidget = new Widget();
+    const fileType = file.is_group
+      ? `${file.file_type} (group)`
+      : file.file_type;
+    typeWidget.node.textContent = fileType;
+    typeWidget.node.style.flex = '2';
+    typeWidget.node.style.textAlign = 'right';
+    typeWidget.node.style.whiteSpace = 'nowrap';
 
     // Created date column.
     const createdWidget = new Widget();
@@ -293,6 +309,7 @@ export class CPGPortalFilesWidget extends Widget {
     actionWidget.node.appendChild(designSystemProvider);
 
     row.node.appendChild(nameWidget.node);
+    row.node.appendChild(typeWidget.node);
     row.node.appendChild(createdWidget.node);
     row.node.appendChild(sizeWidget.node);
     row.node.appendChild(actionWidget.node);
@@ -350,6 +367,70 @@ export class CPGPortalFilesWidget extends Widget {
    */
   private async downloadFile(file: ICPGPortalFile): Promise<void> {
     try {
+      // If this is a group, create a folder and download all children
+      if (file.children && file.children.length > 0) {
+        // Create the group folder with unique name
+        const folderName = await this._getUniqueFolderName(file.name);
+        try {
+          await this._app.serviceManager.contents.save(folderName, {
+            type: 'directory'
+          });
+        } catch (error) {
+          console.error(`Error creating folder ${folderName}:`, error);
+          return;
+        }
+
+        // Download each child file into the group folder
+        for (const child of file.children) {
+          await this._downloadSingleFile(child, `${folderName}/`);
+        }
+        return;
+      }
+
+      // For regular files, download directly
+      await this._downloadSingleFile(file);
+    } catch (error) {
+      console.error(`Error downloading file ${file.name}:`, error);
+    }
+  }
+
+  /**
+   * Get a unique folder name by checking if it exists and adding a number suffix if needed.
+   * @param baseName - The base folder name.
+   * @returns A unique folder name.
+   */
+  private async _getUniqueFolderName(baseName: string): Promise<string> {
+    let folderName = baseName;
+    let counter = 1;
+    const maxAttempts = 1000; // Prevent infinite loop
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        // Try to get the folder to see if it exists
+        await this._app.serviceManager.contents.get(folderName);
+        // If we get here, the folder exists, so try the next name
+        folderName = `${baseName} (${counter})`;
+        counter++;
+      } catch (error) {
+        // If we get an error, the folder doesn't exist, so we can use this name
+        return folderName;
+      }
+    }
+
+    // Fallback if we somehow reach the max attempts
+    return `${baseName} (${Date.now()})`;
+  }
+
+  /**
+   * Download a single file to the specified path.
+   * @param file - The file to download.
+   * @param pathPrefix - Optional path prefix (for group folders).
+   */
+  private async _downloadSingleFile(
+    file: ICPGPortalFile,
+    pathPrefix: string = ''
+  ): Promise<void> {
+    try {
       const url = await this._drive.getDownloadUrl(file.id);
       const response = await fetch(url, {
         headers: {
@@ -360,10 +441,12 @@ export class CPGPortalFilesWidget extends Widget {
         return;
       }
       const blob = await response.blob();
+      const fileName = pathPrefix + file.name;
+
       // Save file based on MIME type.
       if (blob.type.startsWith('text/')) {
         const textContent = await blob.text();
-        await this._app.serviceManager.contents.save(file.name, {
+        await this._app.serviceManager.contents.save(fileName, {
           type: 'file',
           format: 'text',
           content: textContent
@@ -375,7 +458,7 @@ export class CPGPortalFilesWidget extends Widget {
           if (typeof dataUrl === 'string') {
             const base64Data = dataUrl.split(',')[1];
             try {
-              await this._app.serviceManager.contents.save(file.name, {
+              await this._app.serviceManager.contents.save(fileName, {
                 type: 'file',
                 format: 'base64',
                 content: base64Data
