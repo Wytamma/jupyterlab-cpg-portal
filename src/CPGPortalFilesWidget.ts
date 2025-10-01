@@ -238,7 +238,9 @@ export class CPGPortalFilesWidget extends Widget {
 
     // File name column.
     const nameWidget = new Widget();
-    nameWidget.node.textContent = file.name;
+    nameWidget.node.textContent = file.is_group
+      ? `${file.name} (group)`
+      : file.name;
     nameWidget.node.style.flex = '3';
     nameWidget.node.style.whiteSpace = 'nowrap';
     nameWidget.node.style.overflow = 'hidden';
@@ -246,9 +248,7 @@ export class CPGPortalFilesWidget extends Widget {
 
     // Type column.
     const typeWidget = new Widget();
-    const fileType = file.is_group
-      ? `${file.file_type} (group)`
-      : file.file_type;
+    const fileType = file.file_type;
     typeWidget.node.textContent = fileType;
     typeWidget.node.style.flex = '2';
     typeWidget.node.style.textAlign = 'right';
@@ -362,6 +362,22 @@ export class CPGPortalFilesWidget extends Widget {
   }
 
   /**
+   * Sanitize a file name to make it safe for file system use.
+   * @param fileName - The original file name.
+   * @returns A sanitized file name.
+   */
+  private _sanitizeFileName(fileName: string): string {
+    // Replace unsafe characters with underscores or safe alternatives
+    return fileName
+      .replace(/[<>:"/\\|?*]/g, '_') // Replace Windows/Linux unsafe chars
+      .replace(/\s+/g, '_') // Replace spaces with underscores
+      .replace(/[^\w\-_.]/g, '_') // Replace any other non-word chars except dash, underscore, dot
+      .replace(/_+/g, '_') // Replace multiple underscores with single
+      .replace(/^_|_$/g, '') // Remove leading/trailing underscores
+      .substring(0, 255); // Limit length to 255 characters
+  }
+
+  /**
    * Download a file using the drive's getDownloadUrl method.
    * @param file - The Contents.IModel representing the file.
    */
@@ -369,20 +385,22 @@ export class CPGPortalFilesWidget extends Widget {
     try {
       // If this is a group, create a folder and download all children
       if (file.children && file.children.length > 0) {
-        // Create the group folder with unique name
-        const folderName = await this._getUniqueFolderName(file.name);
+        // Create the group folder (or use existing one)
+        const safeFolderName = this._sanitizeFileName(file.name);
         try {
-          await this._app.serviceManager.contents.save(folderName, {
+          await this._app.serviceManager.contents.save(safeFolderName, {
             type: 'directory'
           });
         } catch (error) {
-          console.error(`Error creating folder ${folderName}:`, error);
-          return;
+          // Folder might already exist, that's okay - we'll save over it
+          console.log(
+            `Folder ${safeFolderName} might already exist, continuing...`
+          );
         }
 
         // Download each child file into the group folder
         for (const child of file.children) {
-          await this._downloadSingleFile(child, `${folderName}/`);
+          await this._downloadSingleFile(child, `${safeFolderName}/`);
         }
         return;
       }
@@ -392,33 +410,6 @@ export class CPGPortalFilesWidget extends Widget {
     } catch (error) {
       console.error(`Error downloading file ${file.name}:`, error);
     }
-  }
-
-  /**
-   * Get a unique folder name by checking if it exists and adding a number suffix if needed.
-   * @param baseName - The base folder name.
-   * @returns A unique folder name.
-   */
-  private async _getUniqueFolderName(baseName: string): Promise<string> {
-    let folderName = baseName;
-    let counter = 1;
-    const maxAttempts = 1000; // Prevent infinite loop
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        // Try to get the folder to see if it exists
-        await this._app.serviceManager.contents.get(folderName);
-        // If we get here, the folder exists, so try the next name
-        folderName = `${baseName} (${counter})`;
-        counter++;
-      } catch (error) {
-        // If we get an error, the folder doesn't exist, so we can use this name
-        return folderName;
-      }
-    }
-
-    // Fallback if we somehow reach the max attempts
-    return `${baseName} (${Date.now()})`;
   }
 
   /**
@@ -441,7 +432,7 @@ export class CPGPortalFilesWidget extends Widget {
         return;
       }
       const blob = await response.blob();
-      const fileName = pathPrefix + file.name;
+      const fileName = pathPrefix + this._sanitizeFileName(file.name);
 
       // Save file based on MIME type.
       if (blob.type.startsWith('text/')) {
