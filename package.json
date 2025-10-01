@@ -1,6 +1,6 @@
 {
     "name": "jupyterlab_cpg_portal",
-    "version": "0.1.9",
+    "version": "0.1.10",
     "description": "Access file in CPG Portal",
     "keywords": [
         "jupyter",
